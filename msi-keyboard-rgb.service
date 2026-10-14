@@ -1,0 +1,11 @@
+[Unit]
+Description=Set MSI GE76 Keyboard and Lightbar RGB on Boot
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 %h/msi-ge76-rgb/msi_keyboard_control.py --color ff0000
+
+[Install]
+WantedBy=default.target
