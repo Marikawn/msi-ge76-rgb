@@ -112,6 +112,100 @@ EFFECT_STEADY_FRAMES = [
 ]
 
 
+def parse_vid_pid(device_str, default_vid=VENDOR_ID):
+    """
+    Parse a hardware ID string into (vendor_id, product_id).
+    Supports '1038:113a', '0x1038:0x113a', '113a', or '0x113a'.
+    """
+    if not device_str:
+        return None
+    s = device_str.strip().lower()
+    if ":" in s:
+        parts = s.split(":")
+        vid = int(parts[0], 16)
+        pid = int(parts[1], 16)
+        return (vid, pid)
+    else:
+        pid = int(s, 16)
+        return (default_vid, pid)
+
+
+def enumerate_steelseries_devices():
+    """Find all connected SteelSeries HID devices on the USB bus."""
+    devices = []
+    seen = set()
+    for dev in hid.enumerate():
+        mfg = (dev.get("manufacturer_string") or "").lower()
+        vid = dev.get("vendor_id", 0)
+        if vid == VENDOR_ID or "steelseries" in mfg:
+            key = (vid, dev.get("product_id"), dev.get("interface_number"), dev.get("path"))
+            if key not in seen:
+                seen.add(key)
+                devices.append(dev)
+    return devices
+
+
+def print_detected_devices():
+    """Print all detected SteelSeries HID devices for the user."""
+    devs = enumerate_steelseries_devices()
+    print("=" * 68)
+    print("Detected SteelSeries USB HID Devices")
+    print("=" * 68)
+    if not devs:
+        print("No SteelSeries HID devices found.")
+        print("Tip: If devices are visible in 'lsusb', check permissions")
+        print("     or install udev rules (see README.md).")
+        print("=" * 68)
+        return
+
+    for d in devs:
+        vid = d.get("vendor_id", 0)
+        pid = d.get("product_id", 0)
+        iface = d.get("interface_number", -1)
+        prod = d.get("product_string") or "Unknown"
+        path = d.get("path")
+        path_str = path.decode() if isinstance(path, bytes) else str(path)
+        role = ""
+        prod_lower = prod.lower()
+        if "klc" in prod_lower or "keyboard" in prod_lower:
+            role = " [Keyboard Light Controller]"
+        elif "alc" in prod_lower or "lightbar" in prod_lower or "aurora" in prod_lower:
+            role = " [Aurora Lightbar Controller]"
+
+        print(f"ID: {vid:04x}:{pid:04x} | Interface: {iface} | {prod}{role}")
+        print(f"    Sysfs Path: {path_str}")
+    print("=" * 68)
+
+
+def resolve_device(explicit_id_str, default_vid, default_pid, device_role="keyboard"):
+    """
+    Resolve (vendor_id, product_id) for a device role:
+    1. If explicit_id_str is provided, parse it.
+    2. Check if default (default_vid, default_pid) exists on interface 0.
+    3. Fallback: auto-detect from connected SteelSeries devices.
+    """
+    if explicit_id_str:
+        return parse_vid_pid(explicit_id_str, default_vid=default_vid)
+
+    # Check default
+    if find_device_path(default_vid, default_pid, 0) is not None:
+        return (default_vid, default_pid)
+
+    # Autodetect fallback
+    devs = enumerate_steelseries_devices()
+    for d in devs:
+        if d.get("interface_number") == 0:
+            prod = (d.get("product_string") or "").lower()
+            vid = d.get("vendor_id", default_vid)
+            pid = d.get("product_id", 0)
+            if device_role == "keyboard" and ("klc" in prod or "keyboard" in prod):
+                return (vid, pid)
+            elif device_role == "lightbar" and ("alc" in prod or "lightbar" in prod or "aurora" in prod):
+                return (vid, pid)
+
+    return (default_vid, default_pid)
+
+
 def find_device_path(vendor_id, product_id, interface_number=0):
     """Enumerate USB HID devices and return device path for interface 0."""
     for dev_info in hid.enumerate(vendor_id, product_id):
@@ -354,12 +448,15 @@ def send_lightbar_data(dev, color):
     time.sleep(REPORT_DELAY)
 
 
-def animate_wave(speed=1.0, brightness=100):
+def animate_wave(speed=1.0, brightness=100, kb_target=None, lb_target=None):
     """Continuous smooth rainbow wave sweeping horizontally across keys."""
-    kb_path = find_device_path(VENDOR_ID, PID_KEYBOARD, 0)
-    lb_path = find_device_path(VENDOR_ID, PID_LIGHTBAR, 0)
+    kb_vid, kb_pid = kb_target if kb_target else (VENDOR_ID, PID_KEYBOARD)
+    lb_vid, lb_pid = lb_target if lb_target else (VENDOR_ID, PID_LIGHTBAR)
+
+    kb_path = find_device_path(kb_vid, kb_pid, 0)
+    lb_path = find_device_path(lb_vid, lb_pid, 0)
     if not kb_path:
-        print("[!] Keyboard not found!")
+        print(f"[!] Keyboard ({kb_vid:04x}:{kb_pid:04x}) not found at interface 0!")
         return
 
     kb = hid.device()
@@ -394,12 +491,15 @@ def animate_wave(speed=1.0, brightness=100):
             lb.close()
 
 
-def animate_breathe(base_rgb, speed=1.0, max_brightness=100):
+def animate_breathe(base_rgb, speed=1.0, max_brightness=100, kb_target=None, lb_target=None):
     """Continuous smooth breathing/pulsing animation."""
-    kb_path = find_device_path(VENDOR_ID, PID_KEYBOARD, 0)
-    lb_path = find_device_path(VENDOR_ID, PID_LIGHTBAR, 0)
+    kb_vid, kb_pid = kb_target if kb_target else (VENDOR_ID, PID_KEYBOARD)
+    lb_vid, lb_pid = lb_target if lb_target else (VENDOR_ID, PID_LIGHTBAR)
+
+    kb_path = find_device_path(kb_vid, kb_pid, 0)
+    lb_path = find_device_path(lb_vid, lb_pid, 0)
     if not kb_path:
-        print("[!] Keyboard not found!")
+        print(f"[!] Keyboard ({kb_vid:04x}:{kb_pid:04x}) not found at interface 0!")
         return
 
     kb = hid.device()
@@ -445,21 +545,25 @@ def load_presets():
     return {}
 
 
-def apply_hardware_preset(preset_name, presets_dict, target_device="both"):
+def apply_hardware_preset(preset_name, presets_dict, target_device="both", kb_target=None, lb_target=None):
     """Send raw factory SteelSeries preset frames from presets.json."""
     if preset_name not in presets_dict:
         print(f"[!] Unknown preset '{preset_name}'. Available: {list(presets_dict.keys())}")
         return False
 
+    kb_vid, kb_pid = kb_target if kb_target else (VENDOR_ID, PID_KEYBOARD)
+    lb_vid, lb_pid = lb_target if lb_target else (VENDOR_ID, PID_LIGHTBAR)
+
     targets = []
     if target_device in ("keyboard", "both"):
-        targets.append(("Keyboard (1038:113a)", PID_KEYBOARD))
+        targets.append((f"Keyboard ({kb_vid:04x}:{kb_pid:04x})", kb_vid, kb_pid))
     if target_device in ("lightbar", "both"):
-        targets.append(("Lightbar (1038:113e)", PID_LIGHTBAR))
+        targets.append((f"Lightbar ({lb_vid:04x}:{lb_pid:04x})", lb_vid, lb_pid))
 
-    for name, pid in targets:
-        path = find_device_path(VENDOR_ID, pid, 0)
+    for name, vid, pid in targets:
+        path = find_device_path(vid, pid, 0)
         if not path:
+            print(f"[!] {name} not found at interface 0.")
             continue
         dev = hid.device()
         try:
@@ -535,6 +639,21 @@ def main():
         help="Animation speed multiplier (default: 1.0)"
     )
     parser.add_argument(
+        "--keyboard-id", "--kb-id",
+        dest="keyboard_id",
+        help="Custom Keyboard USB Vendor & Product ID (e.g. 1038:113a or 113a)"
+    )
+    parser.add_argument(
+        "--lightbar-id", "--lb-id",
+        dest="lightbar_id",
+        help="Custom Lightbar USB Vendor & Product ID (e.g. 1038:113e or 113e)"
+    )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="Scan and list all detected SteelSeries HID devices and IDs"
+    )
+    parser.add_argument(
         "--preset", "-p",
         help="Factory SteelSeries preset from presets.json"
     )
@@ -546,7 +665,12 @@ def main():
 
     args = parser.parse_args()
 
-    # 1. Preset listing
+    # 1. Device listing
+    if args.list_devices:
+        print_detected_devices()
+        return
+
+    # 2. Preset listing
     presets = load_presets()
     if args.list_presets:
         if presets:
@@ -557,21 +681,25 @@ def main():
             print("No presets.json found.")
         return
 
-    # 2. Live Animations
+    # Resolve hardware targets
+    kb_target = resolve_device(args.keyboard_id, VENDOR_ID, PID_KEYBOARD, "keyboard")
+    lb_target = resolve_device(args.lightbar_id, VENDOR_ID, PID_LIGHTBAR, "lightbar")
+
+    # 3. Live Animations
     if args.animate == "wave":
-        animate_wave(speed=args.speed, brightness=args.brightness)
+        animate_wave(speed=args.speed, brightness=args.brightness, kb_target=kb_target, lb_target=lb_target)
         return
     elif args.animate == "breathe":
         base_color = parse_hex_color(args.color if args.color else "ff0000", brightness=100)
-        animate_breathe(base_color, speed=args.speed, max_brightness=args.brightness)
+        animate_breathe(base_color, speed=args.speed, max_brightness=args.brightness, kb_target=kb_target, lb_target=lb_target)
         return
 
-    # 3. Factory Preset application
+    # 4. Factory Preset application
     if args.preset:
-        apply_hardware_preset(args.preset, presets, target_device=args.device)
+        apply_hardware_preset(args.preset, presets, target_device=args.device, kb_target=kb_target, lb_target=lb_target)
         return
 
-    # 4. Themes or Custom Static Colors
+    # 5. Themes or Custom Static Colors
     overrides = {}
     if args.wasd:
         overrides["wasd"] = parse_hex_color(args.wasd, args.brightness)
@@ -628,28 +756,33 @@ def main():
 
     # Apply to devices
     if args.device in ("keyboard", "both"):
-        path = find_device_path(VENDOR_ID, PID_KEYBOARD, 0)
+        path = find_device_path(kb_target[0], kb_target[1], 0)
         if path:
             dev = hid.device()
             try:
                 dev.open_path(path)
-                print(f"[*] Programming Keyboard (1038:113a)...")
+                print(f"[*] Programming Keyboard ({kb_target[0]:04x}:{kb_target[1]:04x})...")
                 send_keyboard_data(dev, kb_color_source)
-                print("[+] Keyboard programmed successfully!")
+                print(f"[+] Keyboard ({kb_target[0]:04x}:{kb_target[1]:04x}) programmed successfully!")
             finally:
                 dev.close()
+        else:
+            print(f"[!] Keyboard device ({kb_target[0]:04x}:{kb_target[1]:04x}) interface 0 not found.")
 
     if args.device in ("lightbar", "both"):
-        path = find_device_path(VENDOR_ID, PID_LIGHTBAR, 0)
+        path = find_device_path(lb_target[0], lb_target[1], 0)
         if path:
             dev = hid.device()
             try:
                 dev.open_path(path)
-                print(f"[*] Programming Front Lightbar (1038:113e)...")
+                print(f"[*] Programming Front Lightbar ({lb_target[0]:04x}:{lb_target[1]:04x})...")
                 send_lightbar_data(dev, lightbar_custom)
-                print("[+] Lightbar programmed successfully!")
+                print(f"[+] Front Lightbar ({lb_target[0]:04x}:{lb_target[1]:04x}) programmed successfully!")
             finally:
                 dev.close()
+        else:
+            if args.device == "lightbar":
+                print(f"[!] Front Lightbar device ({lb_target[0]:04x}:{lb_target[1]:04x}) interface 0 not found.")
 
 
 if __name__ == "__main__":

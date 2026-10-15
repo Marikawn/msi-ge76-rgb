@@ -6,10 +6,12 @@ A lightweight, standalone Python tool to control per-key RGB keyboard backlighti
 
 ## Supported Hardware
 
-| Component | Device Name | USB Vendor & Product ID |
-| :--- | :--- | :--- |
-| **Keyboard** | SteelSeries KLC (Keyboard Light Controller) | `1038:113a` |
-| **Front Lightbar** | SteelSeries ALC (Aurora Light Controller) | `1038:113e` |
+| Component | Device Name | Default USB ID | Configurable Flags |
+| :--- | :--- | :--- | :--- |
+| **Keyboard** | SteelSeries KLC (Keyboard Light Controller) | `1038:113a` | `--keyboard-id` / `--kb-id` |
+| **Front Lightbar** | SteelSeries ALC (Aurora Light Controller) | `1038:113e` | `--lightbar-id` / `--lb-id` |
+
+> Other MSI / SteelSeries models (such as GE66, GP66, GP76, GS66, Raider GE77/GE78, Vector GP68/GP76, Stealth 15/17, and Titan GT77) can be auto-detected or specified via custom IDs. See [Finding & Configuring Hardware IDs](#finding-and-configuring-hardware-ids-for-other-laptop-models) below.
 
 ---
 
@@ -214,6 +216,159 @@ systemctl --user status msi-keyboard-rgb.service
 
 ---
 
+## Finding and Configuring Hardware IDs for Other Laptop Models
+
+MSI laptops across different models and sub-series (such as GE66, GE76, GP66, GP76, GS66, Raider GE77/GE78, Vector GP68/GP76/GP77, Stealth 15/17, and Titan GT77) share SteelSeries USB HID controller hardware, but individual product lines may use differing USB Product IDs.
+
+### 1. Identify Your Connected SteelSeries Devices
+
+#### Method A: Built-in Hardware Scanner (Recommended)
+
+Run the script with `--list-devices` to scan the USB bus and display connected SteelSeries HID controllers, interface numbers, and IDs:
+
+```bash
+./msi_keyboard_control.py --list-devices
+```
+
+Example output:
+
+```text
+====================================================================
+Detected SteelSeries USB HID Devices
+====================================================================
+ID: 1038:113a | Interface: 0 | SteelSeries KLC [Keyboard Light Controller]
+    Sysfs Path: 3-9:1.0
+ID: 1038:113a | Interface: 1 | SteelSeries KLC [Keyboard Light Controller]
+    Sysfs Path: 3-9:1.1
+ID: 1038:113e | Interface: 0 | SteelSeries ALC [Aurora Lightbar Controller]
+    Sysfs Path: 3-8:1.0
+ID: 1038:113e | Interface: 1 | SteelSeries ALC [Aurora Lightbar Controller]
+    Sysfs Path: 3-8:1.1
+====================================================================
+```
+
+#### Method B: Using `lsusb`
+
+Query connected SteelSeries USB devices:
+
+```bash
+lsusb | grep -i steelseries
+```
+
+Example output:
+
+```text
+Bus 003 Device 005: ID 1038:113e SteelSeries ApS SteelSeries ALC
+Bus 003 Device 006: ID 1038:113a SteelSeries ApS SteelSeries KLC
+```
+
+#### Method C: Querying sysfs
+
+Inspect the kernel USB device tree directly:
+
+```bash
+grep -s . /sys/bus/usb/devices/*/product | \
+grep -i steelseries
+```
+
+---
+
+### 2. Configure Your Custom IDs
+
+If your laptop uses different Product IDs (for example, `1038:1126`, `1038:113c`, or `1038:1167`):
+
+#### CLI Flags
+Pass your custom IDs using `--keyboard-id` (or `--kb-id`) and `--lightbar-id` (or `--lb-id`). Both `1038:XXXX` and short `XXXX` formats are accepted:
+
+```bash
+./msi_keyboard_control.py \
+--keyboard-id 1038:113a \
+--lightbar-id 1038:113e \
+--color ff0000
+```
+
+#### Automatic Discovery Fallback
+If you omit `--keyboard-id` or `--lightbar-id` and your laptop is not using the default GE76 IDs (`1038:113a`/`1038:113e`), the controller automatically scans the USB bus for any connected SteelSeries KLC (keyboard) or ALC (lightbar) devices on interface 0.
+
+#### Systemd Service Configuration
+Update your unit file (`~/.config/systemd/user/msi-keyboard-rgb.service`) with your specific flags in `ExecStart`:
+
+```ini
+[Unit]
+Description=Set MSI Keyboard and Lightbar RGB on Boot
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 %h/msi-ge76-rgb/msi_keyboard_control.py --keyboard-id 1038:113a --lightbar-id 1038:113e --color ff0000
+
+[Install]
+WantedBy=default.target
+```
+
+---
+
+## OS & Distribution Compatibility
+
+### Technical Compatibility Guarantee
+
+| Environment | Supported? | Details & Setup |
+| :--- | :---: | :--- |
+| **RHEL 8 / 9 & Derivatives**<br>(CentOS Stream, Rocky Linux, AlmaLinux) | **Yes** | Fully supported. Uses system Python 3 (`python3`) and `pip install --user hidapi`. Operates cleanly in userspace. |
+| **Fedora (Workstation & Server)** | **Yes** | Fully supported out of the box with `hidapi`. |
+| **Ubuntu / Debian / Linux Mint / Pop!_OS** | **Yes** | Fully supported. Standard package `python3-pip` and `hidapi`. |
+| **Arch Linux / Manjaro** | **Yes** | Fully supported. `python-hidapi` can be installed via `pacman -S python-hidapi` or pip. |
+| **openSUSE (Tumbleweed & Leap)** | **Yes** | Fully supported with standard Python 3 and `hidapi`. |
+| **Non-systemd Systems**<br>(Alpine OpenRC, Void runit, Artix, Slackware) | **Yes** | The core script is 100% standalone and does **not** depend on systemd. For autostart, use desktop autostart, `.xprofile`, or `/etc/rc.local`. |
+
+---
+
+### Why It Works Across All Distributions
+
+1. **Pure Userspace USB HID Protocol**:
+   This tool communicates directly with the controller hardware via USB Control Transfers (`SET_REPORT` on Endpoint 0) and interrupt endpoints using `hidapi` (`libusb` / `hidraw`). It does **not** rely on custom kernel modules, out-of-tree DKMS drivers, or manufacturer daemons. Any Linux kernel from version 3.x onward natively supports this.
+
+2. **Systemd vs Non-Systemd Autostart**:
+   * **On systemd systems** (RHEL, Fedora, Ubuntu, Debian, Arch, openSUSE):
+     The included user unit runs via `systemctl --user` with `loginctl enable-linger`, applying colors at system startup without root privileges.
+   * **On non-systemd systems** (OpenRC, runit, s6, sysvinit):
+     Add the command to your session autostart (`~/.config/autostart/msi-rgb.desktop`), user profile (`~/.xprofile` or `~/.xinitrc`), or system startup script (`/etc/rc.local`).
+
+3. **User Permissions & Optional udev Rule**:
+   On distributions with standard desktop sessions (GNOME, KDE, etc.), `systemd-logind` automatically grants the active local console user access to HID devices.
+   
+   If you run on a headless, minimal, or server install (e.g. minimal RHEL server without an active graphical seat) and receive permission errors when running without `sudo`, install a udev rule to grant read/write access:
+
+```bash
+sudo tee /etc/udev/rules.d/99-steelseries.rules << 'EOF'
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1038", MODE="0666"
+EOF
+```
+
+Then reload udev rules:
+
+```bash
+sudo udevadm control --reload-rules && \
+sudo udevadm trigger
+```
+
+---
+
+### Hardware Generation & Protocol Compatibility
+
+Modern MSI laptops with SteelSeries per-key RGB fall into two main hardware architectures:
+
+* **Modern Protocol (Supported by this tool)**:
+  - Models: GE76, GE66, GP76, GP66, GS66, Raider GE77/78, Vector GP68/76/77, Stealth 15/17, Titan GT77 (2020 to present).
+  - Protocol: 524-byte feature reports (Report ID `0x0E`), 6-frame steady effect setup (`0x0B`), and 92-byte activation frame (`0x1C`).
+* **Legacy Protocol (Supported by `msi-perkeyrgb`)**:
+  - Models: Older GE63, GE75, GS65 series (2017–2019, typical Product ID `1038:1122`).
+  - Protocol: Legacy 64-byte chunks with Report IDs `0x00`/`0x01`.
+
+---
+
 ## Command Reference
 
 | Flag | Description | Default |
@@ -222,6 +377,9 @@ systemctl --user status msi-keyboard-rgb.service
 | `--theme`, `-t` | Predefined theme (`cyberpunk`, `matrix`, `fire`, etc.) | None |
 | `--brightness`, `-b`| Brightness scaling percentage (`1` to `100`) | `100` |
 | `--device`, `-d` | Target device (`keyboard`, `lightbar`, or `both`) | `both` |
+| `--keyboard-id`, `--kb-id` | Custom Keyboard USB ID (`1038:113a` or `113a`) | `1038:113a` |
+| `--lightbar-id`, `--lb-id` | Custom Lightbar USB ID (`1038:113e` or `113e`) | `1038:113e` |
+| `--list-devices` | Scan and display connected SteelSeries HID devices | None |
 | `--wasd` | Override color for WASD keys | None |
 | `--arrows` | Override color for Arrow keys | None |
 | `--numpad` | Override color for Numpad keys | None |
