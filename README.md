@@ -136,11 +136,19 @@ Run smooth real-time software effects in your terminal (press `Ctrl + C` to stop
 
 ### 6. Factory SteelSeries Presets
 
-Apply original factory animations loaded from `presets.json`:
+Apply original factory animations loaded from `presets.json`. You can control the hardware playback speed of any preset using the `--speed` multiplier (`2.0` for 2x faster, `0.5` for half speed):
 
 ```bash
+# Run disco preset at default speed
 ./msi_keyboard_control.py --preset disco
-./msi_keyboard_control.py --preset aqua
+
+# Run disco preset at double speed (fast flash)
+./msi_keyboard_control.py --preset disco --speed 2.0
+
+# Run aqua preset at half speed (slow wave)
+./msi_keyboard_control.py --preset aqua --speed 0.5
+
+# List all available factory presets
 ./msi_keyboard_control.py --list-presets
 ```
 
@@ -386,7 +394,7 @@ Modern MSI laptops with SteelSeries per-key RGB fall into two main hardware arch
 | `--lightbar-color`| Separate color for front lightbar only | Matches base |
 | `--battery` | Map front lightbar to laptop battery percentage | Disabled |
 | `--animate` | Live animation (`wave` or `breathe`) | None |
-| `--speed` | Animation speed multiplier | `1.0` |
+| `--speed` | Speed multiplier for presets & animations (`0.5`, `2.0`, etc.) | `1.0` |
 | `--preset`, `-p` | Factory preset name from `presets.json` | None |
 | `--list-presets` | Show available factory presets | None |
 

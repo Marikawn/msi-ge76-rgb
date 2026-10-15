@@ -545,8 +545,51 @@ def load_presets():
     return {}
 
 
-def apply_hardware_preset(preset_name, presets_dict, target_device="both", kb_target=None, lb_target=None):
-    """Send raw factory SteelSeries preset frames from presets.json."""
+def scale_preset_frames(raw_hex_list, speed=1.0):
+    """
+    Scale transition and hold durations within 0x0b hardware effect frames.
+    speed > 1.0 accelerates the effect; speed < 1.0 decelerates it.
+    """
+    if speed <= 0:
+        speed = 1.0
+    if abs(speed - 1.0) < 0.01:
+        return [bytearray.fromhex(h) for h in raw_hex_list]
+
+    factor = 1.0 / speed
+    result = []
+    for h in raw_hex_list:
+        b = bytearray.fromhex(h)
+        if b[0] == 0x0b:
+            pos = 4
+            scaled_durations = []
+            while pos + 8 <= len(b):
+                if b[pos:pos+2] == b'\xf0\x0f' or (
+                    b[pos] == 0 and b[pos+1] == 0 and b[pos+2] == 0 and
+                    b[pos+3] == 0 and b[pos+4] == 0 and b[pos+5] == 0
+                ):
+                    break
+                orig_dur = b[pos+4] | (b[pos+5] << 8)
+                if 5 <= orig_dur <= 5000:
+                    new_dur = max(5, min(65535, int(round(orig_dur * factor))))
+                    b[pos+4] = new_dur & 0xff
+                    b[pos+5] = (new_dur >> 8) & 0xff
+                    scaled_durations.append(new_dur)
+                pos += 8
+
+            idx = b.find(b'\xf0\x0f')
+            if idx != -1 and len(scaled_durations) > 0:
+                if idx + 22 <= len(b):
+                    old_tot = b[idx+20] | (b[idx+21] << 8)
+                    if old_tot > 0:
+                        new_tot = max(10, min(65535, int(round(old_tot * factor))))
+                        b[idx+20] = new_tot & 0xff
+                        b[idx+21] = (new_tot >> 8) & 0xff
+        result.append(b)
+    return result
+
+
+def apply_hardware_preset(preset_name, presets_dict, target_device="both", speed=1.0, kb_target=None, lb_target=None):
+    """Send factory SteelSeries preset frames from presets.json with optional speed scaling."""
     if preset_name not in presets_dict:
         print(f"[!] Unknown preset '{preset_name}'. Available: {list(presets_dict.keys())}")
         return False
@@ -560,6 +603,9 @@ def apply_hardware_preset(preset_name, presets_dict, target_device="both", kb_ta
     if target_device in ("lightbar", "both"):
         targets.append((f"Lightbar ({lb_vid:04x}:{lb_pid:04x})", lb_vid, lb_pid))
 
+    frames_to_send = scale_preset_frames(presets_dict[preset_name], speed=speed)
+    speed_info = f" (Speed: {speed}x)" if abs(speed - 1.0) >= 0.01 else ""
+
     for name, vid, pid in targets:
         path = find_device_path(vid, pid, 0)
         if not path:
@@ -568,10 +614,9 @@ def apply_hardware_preset(preset_name, presets_dict, target_device="both", kb_ta
         dev = hid.device()
         try:
             dev.open_path(path)
-            print(f"[*] Applying preset '{preset_name}' to {name}...")
-            for hex_chunk in presets_dict[preset_name]:
-                data = bytearray.fromhex(hex_chunk)
-                dev.send_feature_report(data)
+            print(f"[*] Applying preset '{preset_name}'{speed_info} to {name}...")
+            for frame_data in frames_to_send:
+                dev.send_feature_report(frame_data)
                 time.sleep(REPORT_DELAY)
             dev.write(make_refresh_packet())
             time.sleep(REPORT_DELAY)
@@ -696,7 +741,14 @@ def main():
 
     # 4. Factory Preset application
     if args.preset:
-        apply_hardware_preset(args.preset, presets, target_device=args.device, kb_target=kb_target, lb_target=lb_target)
+        apply_hardware_preset(
+            args.preset,
+            presets,
+            target_device=args.device,
+            speed=args.speed,
+            kb_target=kb_target,
+            lb_target=lb_target
+        )
         return
 
     # 5. Themes or Custom Static Colors
