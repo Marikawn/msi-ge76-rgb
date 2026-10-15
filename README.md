@@ -15,12 +15,14 @@ A lightweight, standalone Python tool to control per-key RGB keyboard backlighti
 
 ---
 
-## Why Other Tools Fail Out of the Box
+## Background & Technical Context
 
-* **`msi-perkeyrgb`**: Targets older laptop generations (GE63/GE75, `1038:1122`). It lacks the modern 92-byte activation frame (`0x1c`) and `0x0b` steady effect engine setup required by newer SteelSeries controllers.
-* **`OpenRGB`**: As of mainline releases, `1038:113a` and `1038:113e` are not yet included in the device detection tables (tracked under OpenRGB Issue #4827).
+This project builds upon the open-source community's ongoing efforts to support per-key RGB on Linux:
 
-This utility implements the full modern handshake directly over userspace USB HID via `hidapi`, eliminating permission hurdles and detection errors.
+* **[msi-perkeyrgb](https://github.com/Askannz/msi-perkeyrgb)** pioneered early reverse engineering of MSI SteelSeries laptop keyboards, focusing on earlier laptop generations (such as GE63/GS65, `1038:1122`) that use an older 64-byte protocol. Modern MSI laptops (such as the GE76/GE66 series) introduced an updated 524-byte feature report architecture requiring a new activation handshake.
+* **[OpenRGB](https://openrgb.org)** is an exceptional multi-vendor RGB management suite supporting thousands of devices. Upstream integration for these newer laptop IDs (`1038:113a` and `1038:113e`) is currently tracked in the community (e.g. OpenRGB Issue #4827).
+
+This standalone utility was created to provide a lightweight, immediate solution tailored specifically to modern MSI GE-series laptops, communicating directly with the hardware via userspace USB HID without requiring external daemons.
 
 ---
 
@@ -406,6 +408,14 @@ Modern MSI laptops with SteelSeries per-key RGB fall into two main hardware arch
 | `--speed` | Speed multiplier for presets & animations (`0.5`, `2.0`, etc.) | `1.0` |
 | `--preset`, `-p` | Factory preset name from `presets.json` | None |
 | `--list-presets` | Show available factory presets | None |
+
+---
+
+## Acknowledgements & Credits
+
+* **[OpenRGB](https://openrgb.org)** for their tremendous work providing a universal, vendor-neutral RGB ecosystem across Linux.
+* **[msi-perkeyrgb](https://github.com/Askannz/msi-perkeyrgb)** for pioneering early reverse engineering of MSI laptop keyboard protocols.
+* **Design & Presets**: All curated designer themes (`cyberpunk`, `matrix`, `fire`, `ice`, `gaming`, `sunset`) and live animations (`wave`, `breathe`) are original custom profiles created specifically for this project. The factory presets (`aqua`, `disco`, etc.) correspond to the laptop's built-in onboard firmware animation profiles.
 
 ---
 
