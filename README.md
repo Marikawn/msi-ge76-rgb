@@ -46,6 +46,14 @@ Make sure the script is executable:
 chmod +x msi_keyboard_control.py
 ```
 
+### Quick Help
+
+To display all available flags, arguments, and options at any time:
+
+```bash
+./msi_keyboard_control.py -h
+```
+
 ### 1. Steady Colors
 
 Set both keyboard and lightbar to steady red (`#ff0000`):
@@ -381,6 +389,7 @@ Modern MSI laptops with SteelSeries per-key RGB fall into two main hardware arch
 
 | Flag | Description | Default |
 | :--- | :--- | :--- |
+| `-h`, `--help` | Show command-line help message and exit | None |
 | `--color`, `-c` | Base HTML hex color (`ff0000`, `00ff00`, etc.) | `ff0000` |
 | `--theme`, `-t` | Predefined theme (`cyberpunk`, `matrix`, `fire`, etc.) | None |
 | `--brightness`, `-b`| Brightness scaling percentage (`1` to `100`) | `100` |
